@@ -3,14 +3,19 @@ library(readxl)
 
 upload <- function(id, trait, units, EFO, download_dir)
 {
+	# Get file path
+	# Each file has two datasets - one for the population estimate and one for the sibling estimate. Need to process the same file twice
 	fn <- file.path(download_dir, paste0(id, ".summary.gz"))
 	message(fn)
 	message(file.exists(fn))
+
+	# Get the sample size for sibs (n1) and population (n2) from the files
 	n1 <- system(paste0("gunzip -c ", fn, " |  awk '{ print $9 }' | sort | tail -n 2 | head -n 1"), intern=T)
 	n2 <- system(paste0("gunzip -c ", fn, " |  awk '{ print $13 }' | sort | tail -n 2 | head -n 1"), intern=T)
 	message(n1)
 	message(n2)
 
+	# Do sibs dataset
 	x <- Dataset$new(filename=fn)
 
 	# Specify columns
@@ -42,7 +47,9 @@ upload <- function(id, trait, units, EFO, download_dir)
 	# Upload summary data
 	x$api_gwasdata_upload()
 
-	# Initialise
+	###
+
+	# Do population dataset
 	y <- Dataset$new(filename=fn)
 
 	# Specify columns
@@ -73,14 +80,59 @@ upload <- function(id, trait, units, EFO, download_dir)
 	# Upload summary data
 	y$api_gwasdata_upload()
 
+	# Return the sib and population Dataset objects
+	# We can use these to check status of each upload, get reports, release etc.
 	return(list(x=x, y=y))
 }
 
-
+# Read in list of traits
 traits <- readxl::read_xlsx("~/repo/opengwas-sibgwas-import/traits.xlsx")
 traits$download_dir <- "/Volumes/MORPHY/Downloads/OneDrive_1_28-11-2021/"
 
+# For each trait do the upload
 res <- lapply(1:nrow(traits), function(i)
 {
 	do.call(upload, traits[i,])
+})
+
+# Check the qc status for each sib trait
+sapply(res, function(i)
+{
+	i$x$api_qc_status() %>% fromJSON() %>% {.$results['status']}
+})
+
+# Check the qc status for each population trait
+sapply(res, function(i)
+{
+	i$y$api_qc_status() %>% fromJSON() %>% {.$results['status']}
+})
+
+# Get the reports
+lapply(res, function(i)
+{
+	i$x$api_report()
+})
+
+lapply(res, function(i)
+{
+	i$y$api_report()
+})
+
+# Release all datasets
+lapply(res, function(i)
+{
+	i$x$api_gwas_release()
+	i$y$api_gwas_release()
+})
+
+# Check the release status for each sib trait
+sapply(res, function(i)
+{
+	i$x$api_qc_status() %>% fromJSON() %>% {.$results['status']}
+})
+
+# Check the release status for each population trait
+sapply(res, function(i)
+{
+	i$y$api_qc_status() %>% fromJSON() %>% {.$results['status']}
 })
